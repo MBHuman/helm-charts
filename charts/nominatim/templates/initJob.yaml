@@ -94,14 +94,37 @@ spec:
             - /bin/sh
             - -c
             - |
-              if [ -f "data.osm.pbf" ]; then
-                echo "data.osm.pbf exists."
+              # Delete files not in .Values.nominatimInitialize.pbfUrls
+              for file in *; do
+                if [ -f "$file" ] && [[ ! " ${NOMINATIM_PBF_URLS} " =~ " $file " ]]; then
+                  echo "Deleting $file"
+                  rm "$file"
+                fi
+              done
+
+              echo "Downloading pbf files"
+
+              # Iterate through each URL in the array
+              {{- range .Values.nominatimInitialize.pbfUrls }}
+              url="{{ . }}"
+              filename=$(basename "$url")
+
+              # Download the PBF file using curl
+              curl -A "my-user-agent" "$url" --create-dirs -L -f -o "$filename"
+
+              # Check if the download was successful
+              if [ $? -eq 0 ]; then
+                echo "Download successful. Saved as $filename."
               else
-                echo "Downloading pbf file"
-                curl -A {{ include "chart.userAgent" . }} \
-                {{ .Values.nominatimInitialize.pbfUrl }} \
-                --create-dirs -L -f -o data.osm.pbf
+                echo "Download failed for $url."
               fi
+              {{- end }}
+          env:
+            - name: NOMINATIM_PBF_URLS
+              value: |
+                {{- range .Values.nominatimInitialize.pbfUrls }}
+                {{ . }}
+                {{- end }}
 
 
       containers:
@@ -141,7 +164,12 @@ spec:
             - /bin/bash
             - -ec
             - |
-              nominatim import --osm-file data.osm.pbf --threads $THREADS
+
+              osm_files=""
+              for osm_file in *.osm.pbf; do
+                osm_files+="--osm-file $osm_file "
+              done
+              nominatim import $osm_files --threads $THREADS
               nominatim index --threads $THREADS
               nominatim admin --check-database
 
